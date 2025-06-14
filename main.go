@@ -14,7 +14,8 @@ type Store struct {
 	Value string `json:"value"`
 }
 
-func saveFile(key string, value string) {
+func saveFile(key string, value string, store map[string]string) {
+
 	err := os.MkdirAll("db", 0755)
 
 	if err != nil {
@@ -29,12 +30,10 @@ func saveFile(key string, value string) {
 		log.Fatal("Error creating file ", err)
 	}
 
-	store := Store{
-		Key:   key,
-		Value: value,
-	}
-
-	var stores []Store
+	// store := Store{
+	// Key:   key,
+	// Value: value,
+	// }
 
 	storesBytes, err := os.ReadFile("db/komi.json")
 
@@ -42,26 +41,26 @@ func saveFile(key string, value string) {
 		log.Fatal("Error reading db ", err)
 	}
 
-	if len(storesBytes) > 0 {
+	if len(storesBytes) == 0 {
 
-		err = json.Unmarshal(storesBytes, &stores)
-
-		if err != nil {
-			log.Fatal("Error parsing stores ", err)
-		}
-
-	} else {
-		stores = []Store{}
+		store = make(map[string]string)
 	}
-	stores = append(stores, store)
-	
-	f, err := json.Marshal(&stores)
+
+	// for k, _ := range *store {
+	// 	if k == key {
+	// 		fmt.Println("Key already set")
+	// 		os.Exit(1)
+	// 	}
+	// }
+	store[key] = value
+
+	bytes, err := json.Marshal(store)
 
 	if err != nil {
-		log.Fatal("Error parsing data ", err)
+		log.Fatal("Error parsing store ", err)
 	}
 
-	_, err = file.Write(f)
+	_, err = file.Write(bytes)
 
 	if err != nil {
 		log.Fatal("Error writing to db ", err)
@@ -69,7 +68,7 @@ func saveFile(key string, value string) {
 
 }
 
-func handleConnection(conn net.Conn, store chan<- string) {
+func handleConnection(conn net.Conn, ch chan<- string, store map[string]string) {
 
 	defer conn.Close()
 
@@ -78,6 +77,9 @@ func handleConnection(conn net.Conn, store chan<- string) {
 	for {
 		n, err := conn.Read(opt)
 
+		if err != nil {
+			log.Fatal("Error reading from server ", err)
+		}
 		input := string(opt[:n])
 		parts := strings.Fields(input)
 
@@ -88,19 +90,16 @@ func handleConnection(conn net.Conn, store chan<- string) {
 		switch parts[0] {
 		case "SET":
 			key := parts[1]
-			value := parts[2]
+			value := strings.Join(parts[2:], " ")
 
 			fmt.Println(key)
-			store <- key
+			ch <- key
 
-			saveFile(key, value)
+			saveFile(key, value, store)
 		default:
 			fmt.Println("Invalid option")
 		}
 
-		if err != nil {
-			log.Fatal("Error reading from server ", err)
-		}
 		fmt.Println(string(opt))
 	}
 
@@ -108,7 +107,9 @@ func handleConnection(conn net.Conn, store chan<- string) {
 
 func main() {
 
-	store := make(chan string)
+	ch := make(chan string)
+
+	store := make(map[string]string)
 
 	l, err := net.Listen("tcp", ":3005")
 
@@ -128,8 +129,8 @@ func main() {
 			log.Fatal("Error accepting connection ", err)
 		}
 
-		go handleConnection(conn, store)
-		fmt.Println(<-store)
+		go handleConnection(conn, ch, store)
+		fmt.Println(<-ch)
 	}
 
 }
