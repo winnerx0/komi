@@ -7,8 +7,8 @@ A simple database written in go
 - Key Value storage
 - Store data using .db file
 - Basic CLI
-* SET [x]
-* GET [x]
-* DEL [x]
-* EXIT [x]
-- Ensure data survives restart
+- SET [x]
+- GET [x]
+- DEL [x]
+- EXIT [x]
+- Ensure data survives restar 
