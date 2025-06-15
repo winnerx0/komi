@@ -14,7 +14,7 @@ type Store struct {
 	Value string `json:"value"`
 }
 
-func saveFile(key string, value string, store map[string]string) {
+func saveFile(key string, value string) {
 
 	err := os.MkdirAll("db", 0755)
 
@@ -41,9 +41,18 @@ func saveFile(key string, value string, store map[string]string) {
 		log.Fatal("Error reading db ", err)
 	}
 
+	var store map[string]any
+
 	if len(storesBytes) == 0 {
 
-		store = make(map[string]string)
+		store = make(map[string]any)
+	} else {
+
+		err = json.Unmarshal(storesBytes, &store)
+
+		if err != nil {
+			log.Fatal("Error retreiving store ", err)
+		}
 	}
 
 	// for k, _ := range *store {
@@ -68,7 +77,7 @@ func saveFile(key string, value string, store map[string]string) {
 
 }
 
-func handleConnection(conn net.Conn, ch chan<- string, store map[string]string) {
+func handleConnection(conn net.Conn) {
 
 	defer conn.Close()
 
@@ -92,10 +101,18 @@ func handleConnection(conn net.Conn, ch chan<- string, store map[string]string) 
 			key := parts[1]
 			value := strings.Join(parts[2:], " ")
 
-			fmt.Println(key)
-			ch <- key
+			fmt.Println(key, value)
 
-			saveFile(key, value, store)
+			saveFile(key, value)
+		case "GET":
+			storeBytes, err := os.ReadFile("db/komi.json")
+
+			if err != nil {
+				log.Fatal("Error reading db ", err)
+			}
+
+			fmt.Println(string(storeBytes))
+			conn.Write(storeBytes)
 		default:
 			fmt.Println("Invalid option")
 		}
@@ -106,10 +123,6 @@ func handleConnection(conn net.Conn, ch chan<- string, store map[string]string) 
 }
 
 func main() {
-
-	ch := make(chan string)
-
-	store := make(map[string]string)
 
 	l, err := net.Listen("tcp", ":3005")
 
@@ -129,8 +142,7 @@ func main() {
 			log.Fatal("Error accepting connection ", err)
 		}
 
-		go handleConnection(conn, ch, store)
-		fmt.Println(<-ch)
+		go handleConnection(conn)
 	}
 
 }
