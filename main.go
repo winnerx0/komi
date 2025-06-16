@@ -14,7 +14,7 @@ type Store struct {
 	Value string `json:"value"`
 }
 
-func saveFile(key string, value string) {
+func saveFile(conn net.Conn, key string, value string) {
 
 	err := os.MkdirAll("db", 0755)
 
@@ -29,11 +29,6 @@ func saveFile(key string, value string) {
 	if err != nil {
 		log.Fatal("Error creating file ", err)
 	}
-
-	// store := Store{
-	// Key:   key,
-	// Value: value,
-	// }
 
 	storesBytes, err := os.ReadFile("db/komi.json")
 
@@ -55,12 +50,12 @@ func saveFile(key string, value string) {
 		}
 	}
 
-	// for k, _ := range *store {
-	// 	if k == key {
-	// 		fmt.Println("Key already set")
-	// 		os.Exit(1)
-	// 	}
-	// }
+	for k, _ := range store {
+		if k == key {
+			conn.Write([]byte("Key already set\n"))
+			return
+		}
+	}
 	store[key] = value
 
 	bytes, err := json.Marshal(store)
@@ -103,8 +98,8 @@ func handleConnection(conn net.Conn) {
 
 			fmt.Println(key, value)
 
-			saveFile(key, value)
-		case "GET":
+			saveFile(conn, key, value)
+		case "LIST":
 			storeBytes, err := os.ReadFile("db/komi.json")
 
 			if err != nil {
@@ -113,11 +108,41 @@ func handleConnection(conn net.Conn) {
 
 			fmt.Println(string(storeBytes))
 			conn.Write(storeBytes)
+		case "GET":
+			if len(parts) < 2 {
+				conn.Write([]byte("No key entered"))
+				continue
+			}
+
+			key := parts[1]
+
+			var store map[string]any
+
+			storeBytes, err := os.ReadFile("db/komi.json")
+
+			if err != nil {
+				log.Fatal("Error reading db ", err)
+			}
+
+			err = json.Unmarshal(storeBytes, &store)
+
+			if err != nil {
+				log.Fatal("Error enoding store ", err)
+			}
+
+			for k, v := range store {
+				if k == key {
+					response := fmt.Sprintf("Key: %s\nValue: %s\n", k, v)
+					conn.Write([]byte(response))
+					return
+
+				}
+			}
+			conn.Write([]byte("No value stored in database for " + key + "\n"))
 		default:
-			fmt.Println("Invalid option")
+			conn.Write([]byte("Invalid option\n"))
 		}
 
-		fmt.Println(string(opt))
 	}
 
 }
