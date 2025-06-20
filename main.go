@@ -14,10 +14,27 @@ type Store struct {
 	Value string `json:"value"`
 }
 
-func saveFile(conn net.Conn, key string, value string) {
 
+func startUp(store map[string]any) {
+	storeBytes, err := os.ReadFile("db/komi.json")
+
+	if err != nil {
+		log.Fatal("Error reading db ", err)
+	}
+
+	err = json.Unmarshal(storeBytes, &store)
+
+	if err != nil {
+		log.Fatal("Error encoding store ", err)
+	}
+
+	fmt.Println(store)
+
+	
+}
+
+func saveFile(conn net.Conn, key string, value string, store map[string]any) {
 	err := os.MkdirAll("db", 0755)
-
 	if err != nil {
 		log.Fatal("Error making directory ", err)
 	}
@@ -30,27 +47,12 @@ func saveFile(conn net.Conn, key string, value string) {
 		log.Fatal("Error creating file ", err)
 	}
 
-	storesBytes, err := os.ReadFile("db/komi.json")
-
 	if err != nil {
 		log.Fatal("Error reading db ", err)
 	}
 
-	var store map[string]any
 
-	if len(storesBytes) == 0 {
-
-		store = make(map[string]any)
-	} else {
-
-		err = json.Unmarshal(storesBytes, &store)
-
-		if err != nil {
-			log.Fatal("Error retreiving store ", err)
-		}
-	}
-
-	for k, _ := range store {
+	for k := range store {
 		if k == key {
 			conn.Write([]byte("Key already set\n"))
 			return
@@ -59,28 +61,29 @@ func saveFile(conn net.Conn, key string, value string) {
 	store[key] = value
 
 	bytes, err := json.Marshal(store)
-
 	if err != nil {
 		log.Fatal("Error parsing store ", err)
 	}
 
 	_, err = file.Write(bytes)
 
+	conn.Write([]byte("Set Successfully\n"))
+
 	if err != nil {
 		log.Fatal("Error writing to db ", err)
 	}
-
 }
 
 func handleConnection(conn net.Conn) {
-
 	defer conn.Close()
 
+	store := make(map[string]any)
+
+	startUp(store)
 	opt := make([]byte, 1024)
 
 	for {
 		n, err := conn.Read(opt)
-
 		if err != nil {
 			log.Fatal("Error reading from server ", err)
 		}
@@ -93,20 +96,26 @@ func handleConnection(conn net.Conn) {
 
 		switch parts[0] {
 		case "SET":
+
+			if len(parts) < 3 {
+				conn.Write([]byte("No value entered\n"))
+				continue
+			}
+
 			key := parts[1]
 			value := strings.Join(parts[2:], " ")
 
 			fmt.Println(key, value)
 
-			saveFile(conn, key, value)
-		case "LIST":
-			storeBytes, err := os.ReadFile("db/komi.json")
+			saveFile(conn, key, value, store)
 
-			if err != nil {
+
+		case "LIST":
+			storeBytes, err := json.Marshal(store) 
+if err != nil {
 				log.Fatal("Error reading db ", err)
 			}
 
-			fmt.Println(string(storeBytes))
 			conn.Write(storeBytes)
 		case "GET":
 			if len(parts) < 2 {
@@ -115,20 +124,6 @@ func handleConnection(conn net.Conn) {
 			}
 
 			key := parts[1]
-
-			var store map[string]any
-
-			storeBytes, err := os.ReadFile("db/komi.json")
-
-			if err != nil {
-				log.Fatal("Error reading db ", err)
-			}
-
-			err = json.Unmarshal(storeBytes, &store)
-
-			if err != nil {
-				log.Fatal("Error enoding store ", err)
-			}
 
 			for k, v := range store {
 				if k == key {
@@ -144,11 +139,10 @@ func handleConnection(conn net.Conn) {
 		}
 
 	}
-
 }
 
-func main() {
 
+func main() {
 	l, err := net.Listen("tcp", ":3005")
 
 	defer l.Close()
@@ -162,12 +156,10 @@ func main() {
 	for {
 
 		conn, err := l.Accept()
-
 		if err != nil {
 			log.Fatal("Error accepting connection ", err)
 		}
 
 		go handleConnection(conn)
 	}
-
 }
