@@ -143,6 +143,7 @@ func handleConnection(conn net.Conn) {
 
 			if store[key] == nil {
 				conn.Write([]byte("Data not found"))
+				continue
 			}
 
 			delete(store, key)
