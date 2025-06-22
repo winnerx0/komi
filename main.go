@@ -106,12 +106,11 @@ func handleConnection(conn net.Conn) {
 			saveFile(conn, key, value, store)
 
 		case "LIST":
-			storeBytes, err := json.Marshal(store)
-			if err != nil {
-				log.Fatal("Error reading db ", err)
-			}
+			for k, v := range store {
+				singleDate := fmt.Sprintf("Key: %s\t Value: %s\n", k, v)
 
-			conn.Write(storeBytes)
+				conn.Write([]byte(singleDate))
+			}
 		case "GET":
 			if len(parts) < 2 {
 				conn.Write([]byte("No key entered"))
@@ -123,7 +122,7 @@ func handleConnection(conn net.Conn) {
 			found := false
 			for k, v := range store {
 				if k == key {
-					response := fmt.Sprintf("Key: %s\nValue: %s\n", k, v)
+					response := fmt.Sprintf("Key: %s\t Value: %s\n", k, v)
 					conn.Write([]byte(response))
 					found = true
 					break
