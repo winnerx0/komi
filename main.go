@@ -27,17 +27,16 @@ func startUp(store map[string]any) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	file, err := os.OpenFile("db/komi.json", os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile("db/komi.json", os.O_CREATE|os.O_RDONLY, 0644)
 
 	if err != nil {
 		log.Fatal("Error reading db ", err)
 	}
 
-	var storeBytes []byte
+	storeBytes, err := os.ReadFile("db/komi.json")
 
-	file.Read(storeBytes)
-
-	if storeBytes == nil {
+	if err != nil {
+		log.Println("Failed to read file:", err)
 		storeBytes = []byte("{}")
 	}
 
@@ -59,11 +58,7 @@ func saveFile(conn net.Conn, key string, value string) {
 		log.Fatal("Error creating file ", err)
 	}
 
-	mu.Lock()
-	defer func() {
-		mu.Unlock()
-		file.Close()
-	}()
+	defer file.Close()
 
 	if _, exists := store[key]; exists {
 
@@ -72,6 +67,8 @@ func saveFile(conn net.Conn, key string, value string) {
 
 	}
 
+	mu.Lock()
+
 	store[key] = value
 
 	bytes, err := json.Marshal(store)
@@ -79,6 +76,8 @@ func saveFile(conn net.Conn, key string, value string) {
 	if err != nil {
 		log.Fatal("Error parsing store ", err)
 	}
+
+	mu.Unlock()
 
 	_, err = file.Write(bytes)
 
@@ -119,6 +118,7 @@ func handleConnection(conn net.Conn) {
 			}
 
 			key := parts[1]
+
 			value := strings.Join(parts[2:], " ")
 
 			fmt.Println(key, value)
@@ -126,16 +126,12 @@ func handleConnection(conn net.Conn) {
 			saveFile(conn, key, value)
 
 		case "LIST":
-			mu.Lock()
-			defer mu.Unlock()
 			for k, v := range store {
 				singleDate := fmt.Sprintf("Key: %s\t Value: %s\n", k, v)
 
 				conn.Write([]byte(singleDate))
 			}
 		case "GET":
-			mu.Lock()
-			defer mu.Unlock()
 
 			if len(parts) < 2 {
 				conn.Write([]byte("No key entered\n"))
@@ -144,19 +140,20 @@ func handleConnection(conn net.Conn) {
 
 			key := parts[1]
 
-			found := false
-			for k, v := range store {
-				if k == key {
-					response := fmt.Sprintf("Key: %s\t Value: %s\n", k, v)
-					conn.Write([]byte(response))
-					found = true
-					break
-				}
+			mu.Lock()
 
+			value, ok := store[key]
+
+			mu.Unlock()
+
+			if !ok {
+				conn.Write([]byte("No Data Found"))
+				continue
 			}
-			if !found {
-				conn.Write([]byte("No value stored in database for " + key + "\n"))
-			}
+
+			response := fmt.Sprintf("Key: %s\t Value: %s\n", key, value)
+			conn.Write([]byte(response))
+
 		case "DEL":
 
 			if len(parts) < 2 {
@@ -170,19 +167,15 @@ func handleConnection(conn net.Conn) {
 				continue
 			}
 
-			mu.Lock()
 			file, err := os.OpenFile("db/komi.json", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
-
-			defer func() {
-				file.Close()
-				mu.Unlock()
-			}()
-
-			delete(store, key)
 
 			if err != nil {
 				log.Fatal("Error opening file", err)
 			}
+
+			mu.Lock()
+
+			delete(store, key)
 
 			storeBytes, err := json.Marshal(store)
 
@@ -190,7 +183,11 @@ func handleConnection(conn net.Conn) {
 				log.Fatal("Error decoding store ", err)
 			}
 
+			mu.Unlock()
+
 			file.Write(storeBytes)
+
+			file.Close()
 
 			conn.Write([]byte("Deleted Successfully\n"))
 
@@ -202,28 +199,25 @@ func handleConnection(conn net.Conn) {
 			}
 			key := parts[1]
 
-			value := parts[2]
+			value := parts[2:]
 
-			if store[key] == nil {
+			mu.Lock()
+			_, ok := store[key]
+
+			store[key] = strings.Join(value, " ")
+			storeBytes, err := json.Marshal(store)
+			mu.Unlock()
+
+			if !ok {
 				conn.Write([]byte("Data not found\n"))
 				continue
 			}
 
-			mu.Lock()
-			file, err := os.OpenFile("db/komi.json", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
+			file, err := os.OpenFile("db/komi.json", os.O_WRONLY, 0755)
 
 			if err != nil {
 				log.Fatal("Error opening file", err)
 			}
-
-			defer func() {
-				file.Close()
-				mu.Unlock()
-			}()
-
-			store[key] = value
-
-			storeBytes, err := json.Marshal(store)
 
 			if err != nil {
 				log.Fatal("Error decoding store ", err)
@@ -231,6 +225,7 @@ func handleConnection(conn net.Conn) {
 
 			file.Write(storeBytes)
 
+			file.Close()
 			fmt.Println(store)
 			conn.Write([]byte("Updating Successfully\n"))
 
