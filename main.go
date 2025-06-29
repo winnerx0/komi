@@ -3,39 +3,55 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 	"strings"
+	"sync"
 )
 
-type Store struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
-}
+var (
+	mu    sync.Mutex
+	store = make(map[string]any)
+)
 
 func startUp(store map[string]any) {
-	storeBytes, err := os.ReadFile("db/komi.json")
+
+	err := os.MkdirAll("db", 0755)
+
+	if err != nil {
+		log.Fatal("Error making directory ", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	file, err := os.OpenFile("db/komi.json", os.O_CREATE|os.O_WRONLY, 0644)
 
 	if err != nil {
 		log.Fatal("Error reading db ", err)
 	}
 
+	var storeBytes []byte
+
+	file.Read(storeBytes)
+
+	if storeBytes == nil {
+		storeBytes = []byte("{}")
+	}
+
 	err = json.Unmarshal(storeBytes, &store)
+
+	file.Write(storeBytes)
 
 	if err != nil {
 		log.Fatal("Error encoding store ", err)
 	}
 
-	fmt.Println(store)
-
 }
 
-func saveFile(conn net.Conn, key string, value string, store map[string]any) {
-	err := os.MkdirAll("db", 0755)
-	if err != nil {
-		log.Fatal("Error making directory ", err)
-	}
+func saveFile(conn net.Conn, key string, value string) {
 
 	file, err := os.OpenFile("db/komi.json", os.O_CREATE|os.O_WRONLY, 0755)
 
@@ -43,14 +59,19 @@ func saveFile(conn net.Conn, key string, value string, store map[string]any) {
 		log.Fatal("Error creating file ", err)
 	}
 
-	defer file.Close()
+	mu.Lock()
+	defer func() {
+		mu.Unlock()
+		file.Close()
+	}()
 
-	for k := range store {
-		if k == key {
-			conn.Write([]byte("Key already set\n"))
-			return
-		}
+	if _, exists := store[key]; exists {
+
+		conn.Write([]byte("Key already set\n"))
+		return
+
 	}
+
 	store[key] = value
 
 	bytes, err := json.Marshal(store)
@@ -72,16 +93,15 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
 	conn.Write([]byte("Welcome To Komi\n"))
-	store := make(map[string]any)
 
-	startUp(store)
+	// startUp(store)
 	opt := make([]byte, 1024)
 
 	for {
 		n, err := conn.Read(opt)
 
-		if err != nil {
-			log.Fatal("Error reading from server ", err)
+		if err == io.EOF {
+			fmt.Println("Done reading from server")
 		}
 		input := string(opt[:n])
 		parts := strings.Fields(input)
@@ -103,17 +123,22 @@ func handleConnection(conn net.Conn) {
 
 			fmt.Println(key, value)
 
-			saveFile(conn, key, value, store)
+			saveFile(conn, key, value)
 
 		case "LIST":
+			mu.Lock()
+			defer mu.Unlock()
 			for k, v := range store {
 				singleDate := fmt.Sprintf("Key: %s\t Value: %s\n", k, v)
 
 				conn.Write([]byte(singleDate))
 			}
 		case "GET":
+			mu.Lock()
+			defer mu.Unlock()
+
 			if len(parts) < 2 {
-				conn.Write([]byte("No key entered"))
+				conn.Write([]byte("No key entered\n"))
 				continue
 			}
 
@@ -135,21 +160,25 @@ func handleConnection(conn net.Conn) {
 		case "DEL":
 
 			if len(parts) < 2 {
-				conn.Write([]byte("No key entered"))
+				conn.Write([]byte("No key entered\n"))
 				continue
 			}
 			key := parts[1]
 
 			if store[key] == nil {
-				conn.Write([]byte("Data not found"))
+				conn.Write([]byte("Data not found\n"))
 				continue
 			}
 
-			delete(store, key)
-
+			mu.Lock()
 			file, err := os.OpenFile("db/komi.json", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
 
-			defer file.Close()
+			defer func() {
+				file.Close()
+				mu.Unlock()
+			}()
+
+			delete(store, key)
 
 			if err != nil {
 				log.Fatal("Error opening file", err)
@@ -158,13 +187,53 @@ func handleConnection(conn net.Conn) {
 			storeBytes, err := json.Marshal(store)
 
 			if err != nil {
-				log.Fatal("Error dencoding store ", err)
+				log.Fatal("Error decoding store ", err)
+			}
+
+			file.Write(storeBytes)
+
+			conn.Write([]byte("Deleted Successfully\n"))
+
+		case "UPDATE":
+
+			if len(parts) < 3 {
+				conn.Write([]byte("No value entered\n"))
+				continue
+			}
+			key := parts[1]
+
+			value := parts[2]
+
+			if store[key] == nil {
+				conn.Write([]byte("Data not found\n"))
+				continue
+			}
+
+			mu.Lock()
+			file, err := os.OpenFile("db/komi.json", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
+
+			if err != nil {
+				log.Fatal("Error opening file", err)
+			}
+
+			defer func() {
+				file.Close()
+				mu.Unlock()
+			}()
+
+			store[key] = value
+
+			storeBytes, err := json.Marshal(store)
+
+			if err != nil {
+				log.Fatal("Error decoding store ", err)
 			}
 
 			file.Write(storeBytes)
 
 			fmt.Println(store)
-			conn.Write([]byte("Deleted Successfully\n"))
+			conn.Write([]byte("Updating Successfully\n"))
+
 		default:
 			conn.Write([]byte("Invalid option\n"))
 		}
@@ -182,6 +251,8 @@ func main() {
 	}
 
 	defer l.Close()
+
+	startUp(store)
 
 	for {
 
