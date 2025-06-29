@@ -16,7 +16,7 @@ var (
 	store = make(map[string]any)
 )
 
-func startUp(store map[string]any) {
+func init() {
 
 	err := os.MkdirAll("db", 0755)
 
@@ -93,15 +93,20 @@ func handleConnection(conn net.Conn) {
 
 	conn.Write([]byte("Welcome To Komi\n"))
 
-	// startUp(store)
 	opt := make([]byte, 1024)
 
 	for {
 		n, err := conn.Read(opt)
 
-		if err == io.EOF {
-			fmt.Println("Done reading from server")
+		if err != nil {
+			if err == io.EOF {
+				fmt.Println("Client disconnected")
+			} else {
+				log.Println("Read error:", err)
+			}
+			return // Stop handling this connection
 		}
+
 		input := string(opt[:n])
 		parts := strings.Fields(input)
 
@@ -246,8 +251,6 @@ func main() {
 	}
 
 	defer l.Close()
-
-	startUp(store)
 
 	for {
 
